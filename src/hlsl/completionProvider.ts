@@ -1,7 +1,9 @@
 'use strict';
 
-import { CompletionItemProvider, CompletionItem, CompletionItemKind, CancellationToken, TextDocument, Position, Range, TextEdit, workspace } from 'vscode';
+import { CompletionItemProvider, CompletionItem, CompletionItemKind, CancellationToken, TextDocument, Position, Range, TextEdit, workspace, window } from 'vscode';
 import hlslGlobals = require('./hlslGlobals');
+import { FILE } from 'dns';
+import fs = require('fs');
 
 
 export default class HLSLCompletionItemProvider implements CompletionItemProvider {
@@ -13,6 +15,7 @@ export default class HLSLCompletionItemProvider implements CompletionItemProvide
 
         let enable = workspace.getConfiguration('hlsl').get<boolean>('suggest.basic', true);
         if (!enable) {
+			console.log("Autocompletion disabled !");
             return Promise.resolve(result);
         }
 
@@ -41,7 +44,9 @@ export default class HLSLCompletionItemProvider implements CompletionItemProvide
                     }
                     signature += ')';
                     proposal.detail = signature;
-                }
+				}
+				else
+					proposal.detail = "(void)";
             }
             return proposal;
         };
@@ -83,19 +88,68 @@ export default class HLSLCompletionItemProvider implements CompletionItemProvide
                 added[name] = true;
                 result.push(createNewProposal(CompletionItemKind.Keyword, name, hlslGlobals.keywords[name], 'keyword'));
             }
-        }
+		}
+		
+		// var files = workspace.findFiles("**/*.hlsl").then(u => {
+		var files = workspace.findFiles("*.hlsl").then(u => {
+			u.forEach(uri => console.log(uri.path))
+			var promises = []
+			u.forEach(uri => {
+				promises.push(new Promise((resolve, reject) => {
+					fs.readFile(uri.path, (err, data) => {
+						if (err)
+						{
+							console.log("error: " + err);
+							reject();
+							return ;
+						}
+						RegisterCompletionSymbols(data.toString());
+						resolve();
+					});
+				}));
+			})
 
-        var text = document.getText();
-        var functionMatch = /^\w+\s+([a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*)\s*\(/mg;
-        var match: RegExpExecArray = null;
-        while (match = functionMatch.exec(text)) {
-            var word = match[1];
-            if (!added[word]) {
-                added[word] = true;
-                result.push(createNewProposal(CompletionItemKind.Function, word, null));
-            }
-        }
+			// Wait for all files to be parsed
+			Promise.all(promises).then(() => {
+				console.log("resolve !");
+				return Promise.resolve(result);
+			});
+		});
 
-        return Promise.resolve(result);
+		function RegisterCompletionSymbols(fileContent: string)
+		{
+			var functionMatch = /^\w+\s+([a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*)\s*\((.*)\)/mg;
+			var match: RegExpExecArray = null;
+			while (match = functionMatch.exec(fileContent)) {
+				var word = match[1];
+				var paramsString = match[2];
+				var params = paramsString.split(',');
+				var ps = [];
+				params.forEach(c => {
+					ps.push({
+						label: c,
+						document: "nope"
+					});
+				})
+				if (params.length == 0)
+				{
+					ps.push({
+						label: "void"
+					})
+				}
+				console.log("params: " + word);
+				console.log(ps);
+
+				var e : hlslGlobals.IEntry = {
+					parameters: ps
+				};
+				if (!added[word]) {
+					added[word] = true;
+					result.push(createNewProposal(CompletionItemKind.Function, word, e));
+					console.log("added word: " + word);
+					console.log(result.length);
+				}
+			}
+		}
     }
 }
